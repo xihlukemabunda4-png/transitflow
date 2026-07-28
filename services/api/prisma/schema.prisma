@@ -1,0 +1,231 @@
+// MVP dev schema: SQLite via Prisma (see ../../docs/05-database-schema.md for the
+// full target Postgres schema with enums — SQLite doesn't support native enum types,
+// so enum-like fields here are String with the allowed values noted in comments.
+// Swapping to Postgres later is a datasource change + reintroducing `enum` blocks.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Route {
+  id          String      @id @default(cuid())
+  shortName   String
+  longName    String
+  color       String
+  polyline    String
+  wheelchairAccessible Boolean @default(true)
+  stops       RouteStop[]
+  vehicles    Vehicle[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+model Stop {
+  id          String      @id @default(cuid())
+  name        String
+  lat         Float
+  lng         Float
+  wheelchairAccessible Boolean @default(true)
+  routes      RouteStop[]
+  createdAt   DateTime    @default(now())
+}
+
+model RouteStop {
+  id                 String @id @default(cuid())
+  route              Route  @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  routeId            String
+  stop               Stop   @relation(fields: [stopId], references: [id], onDelete: Cascade)
+  stopId             String
+  sequence           Int
+  distanceFromStartM Float
+
+  @@unique([routeId, stopId])
+  @@index([routeId, sequence])
+}
+
+model Vehicle {
+  id               String            @id @default(cuid())
+  label            String
+  route            Route?            @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  routeId          String?
+  capacitySeated   Int               @default(40)
+  capacityStanding Int               @default(20)
+  wheelchairSpaces Int               @default(2)
+  bicycleSpaces    Int               @default(2)
+  source           String            @default("SIMULATED") // SIMULATED | GPS_FEED
+  status           String            @default("OFF_DUTY")  // OFF_DUTY | ON_ROUTE | DELAYED | OUT_OF_SERVICE
+  mileageKm        Float             @default(0)
+  lastServiceAt    DateTime?
+  nextServiceDueKm Float             @default(10000)
+  positions        VehiclePosition[]
+  shifts           Shift[]
+  createdAt        DateTime          @default(now())
+}
+
+model VehiclePosition {
+  id         String   @id @default(cuid())
+  vehicle    Vehicle  @relation(fields: [vehicleId], references: [id])
+  vehicleId  String
+  lat        Float
+  lng        Float
+  heading    Float
+  speedKph   Float
+  occupancy  String   // EMPTY | AVAILABLE | LIMITED | STANDING_ONLY | FULL
+  recordedAt DateTime @default(now())
+
+  @@index([vehicleId, recordedAt])
+}
+
+model User {
+  id             String               @id @default(cuid())
+  email          String               @unique
+  passwordHash   String
+  displayName    String?
+  role           String               @default("RIDER") // RIDER | DRIVER | DISPATCHER | ADMIN
+  accessibility  AccessibilityPrefs?
+  favoriteRoutes FavoriteRoute[]
+  wallet         Wallet?
+  tickets        Ticket[]
+  driver         Driver?
+  redemptions    RewardRedemption[]
+  lostFoundReports LostFoundReport[]
+  emergencyContacts EmergencyContact[]
+  sosAlerts      SosAlert[]
+  tripShares     TripShare[]
+  createdAt      DateTime             @default(now())
+}
+
+model RewardRedemption {
+  id            String   @id @default(cuid())
+  user          User     @relation(fields: [userId], references: [id])
+  userId        String
+  pointsRedeemed Int
+  creditedCents Int
+  createdAt     DateTime @default(now())
+}
+
+model LostFoundReport {
+  id          String    @id @default(cuid())
+  user        User      @relation(fields: [userId], references: [id])
+  userId      String
+  description String
+  routeId     String?
+  status      String    @default("OPEN") // OPEN | CLAIMED | RESOLVED
+  createdAt   DateTime  @default(now())
+  resolvedAt  DateTime?
+}
+
+model EmergencyContact {
+  id     String @id @default(cuid())
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+  name   String
+  phone  String
+}
+
+model SosAlert {
+  id         String    @id @default(cuid())
+  user       User      @relation(fields: [userId], references: [id])
+  userId     String
+  lat        Float
+  lng        Float
+  message    String?
+  resolvedAt DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+model Wallet {
+  id           String        @id @default(cuid())
+  user         User          @relation(fields: [userId], references: [id])
+  userId       String        @unique
+  balanceCents Int           @default(0)
+  transactions Transaction[]
+}
+
+model Transaction {
+  id          String   @id @default(cuid())
+  wallet      Wallet   @relation(fields: [walletId], references: [id])
+  walletId    String
+  amountCents Int // positive = top-up, negative = spend
+  type        String // TOP_UP | TICKET_PURCHASE | REFUND
+  createdAt   DateTime @default(now())
+
+  @@index([walletId, createdAt])
+}
+
+model Ticket {
+  id         String    @id @default(cuid())
+  user       User      @relation(fields: [userId], references: [id])
+  userId     String
+  passType   String // SINGLE | WEEKLY | MONTHLY | STUDENT | SENIOR | FAMILY
+  qrToken    String    @unique
+  validFrom  DateTime
+  validUntil DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+model Driver {
+  id       String  @id @default(cuid())
+  user     User    @relation(fields: [userId], references: [id])
+  userId   String  @unique
+  shifts   Shift[]
+}
+
+model Shift {
+  id        String     @id @default(cuid())
+  driver    Driver     @relation(fields: [driverId], references: [id])
+  driverId  String
+  vehicle   Vehicle    @relation(fields: [vehicleId], references: [id])
+  vehicleId String
+  startedAt DateTime   @default(now())
+  endedAt   DateTime?
+  incidents Incident[]
+}
+
+model Incident {
+  id          String    @id @default(cuid())
+  shift       Shift     @relation(fields: [shiftId], references: [id])
+  shiftId     String
+  type        String // BREAKDOWN | ACCIDENT | DELAY | ROAD_CLOSURE | OTHER
+  description String?
+  resolvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+model AccessibilityPrefs {
+  id             String  @id @default(cuid())
+  user           User    @relation(fields: [userId], references: [id])
+  userId         String  @unique
+  highContrast   Boolean @default(false)
+  largeText      Boolean @default(false)
+  wheelchairOnly Boolean @default(false)
+}
+
+model FavoriteRoute {
+  id      String @id @default(cuid())
+  user    User   @relation(fields: [userId], references: [id])
+  userId  String
+  routeId String
+
+  @@unique([userId, routeId])
+}
+
+// Self-initiated, time-limited trip sharing — see docs/09-roadmap.md note on
+// why this replaces "family tracking": the rider shares their own trip with
+// whoever holds the link, rather than one account persistently tracking
+// another (which is regulated territory for minors).
+model TripShare {
+  id                String   @id @default(cuid())
+  user              User     @relation(fields: [userId], references: [id])
+  userId            String
+  vehicleId         String
+  destinationStopId String?
+  expiresAt         DateTime
+  createdAt         DateTime @default(now())
+}

@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Consumed as a compiled package by services/api (see package.json "main").
+      - run: npm run build --workspace=services/simulation
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+        working-directory: services/api
+
+      - name: Typecheck API
+        run: npx tsc --noEmit
+        working-directory: services/api
+
+      - name: Typecheck web
+        run: npx tsc --noEmit
+        working-directory: apps/web
+
+      - name: Lint web
+        run: npm run lint --workspace=apps/web
