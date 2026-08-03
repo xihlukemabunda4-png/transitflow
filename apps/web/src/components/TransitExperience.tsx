@@ -286,7 +286,12 @@ export function TransitExperience() {
 
   return (
     <div className="relative w-screen h-screen overflow-hidden">
-      <div ref={mapContainerRef} className="absolute inset-0" />
+      {/* Wrapper owns positioning: maplibre-gl.css forces `position: relative`
+          onto its container element, which would defeat Tailwind's `absolute`
+          and collapse the map to 0 height if applied to the same div. */}
+      <div className="absolute inset-0">
+        <div ref={mapContainerRef} style={{ width: '100%', height: '100%' }} />
+      </div>
 
       <div className="absolute top-4 left-4 z-10 flex items-center gap-2 rounded-tf-md bg-tf-surface-raised/95 backdrop-blur-md border border-tf-border px-3 py-2 shadow-lg text-sm">
         {user ? (
