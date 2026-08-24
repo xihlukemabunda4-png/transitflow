@@ -25,7 +25,10 @@ async function authRequest(path: string, body: unknown) {
   });
   if (!res.ok) {
     const data = await res.json().catch(() => null);
-    throw new Error(data?.message ?? `Request failed (${res.status})`);
+    // NestJS's ValidationPipe returns `message` as an array of field errors;
+    // passing that straight to Error() renders them jammed together by commas.
+    const message = Array.isArray(data?.message) ? data.message.join('. ') : data?.message;
+    throw new Error(message || `Request failed (${res.status})`);
   }
   return res.json() as Promise<{ token: string; user: AuthUser }>;
 }

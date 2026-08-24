@@ -35,6 +35,8 @@ export function TransitExperience() {
 
   const [viewMode, setViewMode] = useState<'stops' | 'plan' | 'routes' | 'wallet' | 'safety'>('stops');
   const [alerts, setAlerts] = useState<ServiceAlert[]>([]);
+  const [mapError, setMapError] = useState<string | null>(null);
+  const planResultsRef = useRef<HTMLDivElement>(null);
   const [planFromId, setPlanFromId] = useState('');
   const [planToId, setPlanToId] = useState('');
   const [plans, setPlans] = useState<TripPlan[] | null>(null);
@@ -111,7 +113,25 @@ export function TransitExperience() {
       mapRef.current = map;
       map.addControl(new maplibregl.NavigationControl(), 'top-right');
 
-      map.on('load', () => {
+      // MapLibre reports style/tile failures only through this event; without it
+      // a failed basemap renders as a silently blank map with no clue why.
+      map.on('error', (e) => {
+        // eslint-disable-next-line no-console
+        console.error('[map]', e.error?.message ?? e);
+        setMapError(e.error?.message ?? 'Basemap failed to load');
+      });
+
+      // Adding our own sources/layers only needs the style JSON parsed. The
+      // `load` event instead waits for every basemap source to finish, so a
+      // single slow or broken third-party source (the Liberty style ships a
+      // Natural Earth raster that can stall) would leave the app with no
+      // routes and no stops at all. `styledata` fires as soon as the style is
+      // usable; the flag keeps it to one run since it re-fires on every change.
+      let appLayersAdded = false;
+      const addAppLayers = () => {
+        if (appLayersAdded) return;
+        appLayersAdded = true;
+
         for (const route of routesData) {
           const points: { lat: number; lng: number }[] = JSON.parse(route.polyline);
           map.addSource(`route-${route.id}`, {
@@ -158,7 +178,10 @@ export function TransitExperience() {
         });
         map.on('mouseenter', 'stops-circle', () => (map.getCanvas().style.cursor = 'pointer'));
         map.on('mouseleave', 'stops-circle', () => (map.getCanvas().style.cursor = ''));
-      });
+      };
+
+      if (map.isStyleLoaded()) addAppLayers();
+      else map.on('styledata', addAppLayers);
 
       // Live vehicle tracking.
       const socket = getLiveSocket();
@@ -277,6 +300,9 @@ export function TransitExperience() {
       const result = await api.plan(fromStop, toStop);
       setPlans(result);
       if (result.length === 0) setPlanError('No route found between those stops');
+      // Results render below the fold of the bottom sheet, so without this the
+      // trip appears to have done nothing until you happen to scroll down.
+      else requestAnimationFrame(() => planResultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
     } catch {
       setPlanError('Trip planning failed — is the API running?');
     } finally {
@@ -321,6 +347,12 @@ export function TransitExperience() {
       </div>
 
       <AuthPanel open={authPanelOpen} onClose={() => setAuthPanelOpen(false)} />
+
+      {mapError && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-10 w-[90%] max-w-sm rounded-tf-md bg-tf-warning/95 text-black px-4 py-2 text-sm shadow-lg">
+          Map background unavailable — routes and buses still work. ({mapError})
+        </div>
+      )}
 
       {alerts.length > 0 && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 w-[90%] max-w-sm space-y-2">
@@ -467,7 +499,7 @@ export function TransitExperience() {
 
               {planError && <p className="text-xs text-tf-danger">{planError}</p>}
 
-              <div className="space-y-3">
+              <div className="space-y-3" ref={planResultsRef}>
                 {plans?.map((plan, i) => (
                   <div key={i} className="rounded-tf-md border border-tf-border p-3">
                     <div className="flex items-center justify-between mb-2">
